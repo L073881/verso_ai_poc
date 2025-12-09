@@ -1,27 +1,18 @@
-import requests
+from fastapi import FastAPI, Request
+import uvicorn
 
-GITHUB_TOKEN = "YOUR_TOKEN_HERE"
-OWNER = "EliLillyCo"
-REPO = "lusa-verso-automation"
-BRANCH = "qa"
+app = FastAPI()
 
-def get_github_files(path=""):
-    url = f"https://api.github.com/repos/{OWNER}/{REPO}/contents/{path}?ref={BRANCH}"
+@app.post("/process")
+async def process_webhook(request: Request):
+    data = await request.json()
 
-    headers = {
-        "Authorization": f"token {GITHUB_TOKEN}",
-        "Accept": "application/vnd.github.v3+json"
-    }
+    print("\n🔥 JIRA WEBHOOK RECEIVED 🔥")
+    print(data)
 
-    response = requests.get(url, headers=headers)
+    # Always respond so Jira doesn't retry
+    return {"status": "received", "ok": True}
 
-    if response.status_code != 200:
-        raise Exception(f"GitHub API Error {response.status_code}: {response.text}")
 
-    return response.json()
-
-# Fetch root folder
-files = get_github_files()
-
-for item in files:
-    print(f"{item['type'].upper()} - {item['name']} - {item['path']}")
+if __name__ == "__main__":
+    uvicorn.run("app:app", host="0.0.0.0", port=8000, reload=True)
