@@ -240,6 +240,26 @@ def batch_upsert_data(conn, schema_name: str, target_table: str, metadata_list: 
     try:
         cursor = conn.cursor()
         
+        # Build WHERE clause to check if any field has changed
+        # This ensures we only update when there's an actual change
+        where_conditions = [
+            f"{schema_name}.{target_table}.glue_catalog_table_type IS DISTINCT FROM EXCLUDED.glue_catalog_table_type",
+            f"{schema_name}.{target_table}.glue_catalog_table_storage_location IS DISTINCT FROM EXCLUDED.glue_catalog_table_storage_location",
+            f"{schema_name}.{target_table}.glue_catalog_table_input_format IS DISTINCT FROM EXCLUDED.glue_catalog_table_input_format",
+            f"{schema_name}.{target_table}.glue_catalog_table_output_format IS DISTINCT FROM EXCLUDED.glue_catalog_table_output_format",
+            f"{schema_name}.{target_table}.glue_catalog_table_serde_library IS DISTINCT FROM EXCLUDED.glue_catalog_table_serde_library",
+            f"{schema_name}.{target_table}.glue_catalog_table_serde_parameters::text IS DISTINCT FROM EXCLUDED.glue_catalog_table_serde_parameters::text",
+            f"{schema_name}.{target_table}.glue_catalog_table_columns_metadata::text IS DISTINCT FROM EXCLUDED.glue_catalog_table_columns_metadata::text",
+            f"{schema_name}.{target_table}.glue_catalog_table_partition_keys_metadata::text IS DISTINCT FROM EXCLUDED.glue_catalog_table_partition_keys_metadata::text",
+            f"{schema_name}.{target_table}.glue_catalog_table_connection_name IS DISTINCT FROM EXCLUDED.glue_catalog_table_connection_name",
+            f"{schema_name}.{target_table}.glue_catalog_table_parameters::text IS DISTINCT FROM EXCLUDED.glue_catalog_table_parameters::text",
+            f"{schema_name}.{target_table}.glue_dq_ruleset_description IS DISTINCT FROM EXCLUDED.glue_dq_ruleset_description",
+            f"{schema_name}.{target_table}.glue_dq_ruleset_dqdl_rules IS DISTINCT FROM EXCLUDED.glue_dq_ruleset_dqdl_rules",
+            f"{schema_name}.{target_table}.glue_dq_ruleset_created_timestamp IS DISTINCT FROM EXCLUDED.glue_dq_ruleset_created_timestamp",
+            f"{schema_name}.{target_table}.glue_dq_ruleset_last_modified_timestamp IS DISTINCT FROM EXCLUDED.glue_dq_ruleset_last_modified_timestamp"
+        ]
+        where_clause = " OR ".join(where_conditions)
+        
         upsert_query = f"""
             INSERT INTO {schema_name}.{target_table} (
                 glue_catalog_database_name,
@@ -281,7 +301,8 @@ def batch_upsert_data(conn, schema_name: str, target_table: str, metadata_list: 
                 glue_dq_ruleset_created_timestamp = EXCLUDED.glue_dq_ruleset_created_timestamp,
                 glue_dq_ruleset_last_modified_timestamp = EXCLUDED.glue_dq_ruleset_last_modified_timestamp,
                 updated_time = CURRENT_TIMESTAMP,
-                updated_by = 'system';
+                updated_by = 'system'
+            WHERE {where_clause};
         """
         
         # Prepare all data tuples
