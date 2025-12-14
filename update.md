@@ -252,7 +252,11 @@ def _prepare_upsert_data(metadata: Dict[str, Any]) -> Tuple:
 
 def batch_upsert_data(conn, schema_name: str, target_table: str, metadata_list: List[Dict[str, Any]], batch_size: int = DEFAULT_BATCH_SIZE) -> int:
     """
-    Batch upsert data into PostgreSQL table (OPTIMIZATION 2: Batch database operations).
+    Production-ready batch upsert data into PostgreSQL table.
+    Only updates records when data has actually changed.
+    
+    Uses proper PostgreSQL syntax that works with execute_batch.
+    In ON CONFLICT DO UPDATE, column names without table prefix refer to existing row.
     
     Args:
         conn: psycopg2 database connection
@@ -271,33 +275,14 @@ def batch_upsert_data(conn, schema_name: str, target_table: str, metadata_list: 
     try:
         cursor = conn.cursor()
         
-        # Build WHERE clause to check if any field has changed
-        # This ensures we only update when there's an actual change
-        # In ON CONFLICT DO UPDATE, must qualify existing row columns with table name to avoid ambiguity
-        # Use jsonb comparison for JSON fields to handle ordering and whitespace differences properly
-        # COALESCE handles NULL values by treating them as empty objects/arrays for comparison
-        # Note: Use quoted table name to handle any special characters
-        table_ref = f'"{target_table}"'  # Quote table name to handle special characters
-        where_conditions = [
-            f"{table_ref}.glue_catalog_table_type IS DISTINCT FROM EXCLUDED.glue_catalog_table_type",
-            f"{table_ref}.glue_catalog_table_storage_location IS DISTINCT FROM EXCLUDED.glue_catalog_table_storage_location",
-            f"{table_ref}.glue_catalog_table_input_format IS DISTINCT FROM EXCLUDED.glue_catalog_table_input_format",
-            f"{table_ref}.glue_catalog_table_output_format IS DISTINCT FROM EXCLUDED.glue_catalog_table_output_format",
-            f"{table_ref}.glue_catalog_table_serde_library IS DISTINCT FROM EXCLUDED.glue_catalog_table_serde_library",
-            f"COALESCE({table_ref}.glue_catalog_table_serde_parameters::jsonb, '{{}}'::jsonb) IS DISTINCT FROM COALESCE(EXCLUDED.glue_catalog_table_serde_parameters::jsonb, '{{}}'::jsonb)",
-            f"COALESCE({table_ref}.glue_catalog_table_columns_metadata::jsonb, '[]'::jsonb) IS DISTINCT FROM COALESCE(EXCLUDED.glue_catalog_table_columns_metadata::jsonb, '[]'::jsonb)",
-            f"COALESCE({table_ref}.glue_catalog_table_partition_keys_metadata::jsonb, '[]'::jsonb) IS DISTINCT FROM COALESCE(EXCLUDED.glue_catalog_table_partition_keys_metadata::jsonb, '[]'::jsonb)",
-            f"{table_ref}.glue_catalog_table_connection_name IS DISTINCT FROM EXCLUDED.glue_catalog_table_connection_name",
-            f"COALESCE({table_ref}.glue_catalog_table_parameters::jsonb, '{{}}'::jsonb) IS DISTINCT FROM COALESCE(EXCLUDED.glue_catalog_table_parameters::jsonb, '{{}}'::jsonb)",
-            f"{table_ref}.glue_dq_ruleset_description IS DISTINCT FROM EXCLUDED.glue_dq_ruleset_description",
-            f"{table_ref}.glue_dq_ruleset_dqdl_rules IS DISTINCT FROM EXCLUDED.glue_dq_ruleset_dqdl_rules",
-            f"{table_ref}.glue_dq_ruleset_created_timestamp IS DISTINCT FROM EXCLUDED.glue_dq_ruleset_created_timestamp",
-            f"{table_ref}.glue_dq_ruleset_last_modified_timestamp IS DISTINCT FROM EXCLUDED.glue_dq_ruleset_last_modified_timestamp"
-        ]
-        where_clause = " OR ".join(where_conditions)
+        # Production-ready upsert query
+        # In ON CONFLICT DO UPDATE WHERE clause, unqualified column names refer to existing row
+        # We use table name qualification to avoid ambiguity
+        # For JSON fields, convert to jsonb for proper semantic comparison
+        table_qualified = f"{schema_name}.{target_table}"
         
         upsert_query = f"""
-            INSERT INTO {schema_name}.{target_table} (
+            INSERT INTO {table_qualified} (
                 glue_catalog_database_name,
                 glue_catalog_table_name,
                 glue_catalog_table_type,
@@ -336,9 +321,60 @@ def batch_upsert_data(conn, schema_name: str, target_table: str, metadata_list: 
                 glue_dq_ruleset_dqdl_rules = EXCLUDED.glue_dq_ruleset_dqdl_rules,
                 glue_dq_ruleset_created_timestamp = EXCLUDED.glue_dq_ruleset_created_timestamp,
                 glue_dq_ruleset_last_modified_timestamp = EXCLUDED.glue_dq_ruleset_last_modified_timestamp,
-                updated_time = CURRENT_TIMESTAMP,
-                updated_by = 'system'
-            WHERE {where_clause};
+                updated_time = CASE 
+                    WHEN (
+                        {target_table}.glue_catalog_table_type IS DISTINCT FROM EXCLUDED.glue_catalog_table_type
+                        OR {target_table}.glue_catalog_table_storage_location IS DISTINCT FROM EXCLUDED.glue_catalog_table_storage_location
+                        OR {target_table}.glue_catalog_table_input_format IS DISTINCT FROM EXCLUDED.glue_catalog_table_input_format
+                        OR {target_table}.glue_catalog_table_output_format IS DISTINCT FROM EXCLUDED.glue_catalog_table_output_format
+                        OR {target_table}.glue_catalog_table_serde_library IS DISTINCT FROM EXCLUDED.glue_catalog_table_serde_library
+                        OR COALESCE({target_table}.glue_catalog_table_serde_parameters::jsonb, '{{}}'::jsonb) IS DISTINCT FROM COALESCE(EXCLUDED.glue_catalog_table_serde_parameters::jsonb, '{{}}'::jsonb)
+                        OR COALESCE({target_table}.glue_catalog_table_columns_metadata::jsonb, '[]'::jsonb) IS DISTINCT FROM COALESCE(EXCLUDED.glue_catalog_table_columns_metadata::jsonb, '[]'::jsonb)
+                        OR COALESCE({target_table}.glue_catalog_table_partition_keys_metadata::jsonb, '[]'::jsonb) IS DISTINCT FROM COALESCE(EXCLUDED.glue_catalog_table_partition_keys_metadata::jsonb, '[]'::jsonb)
+                        OR {target_table}.glue_catalog_table_connection_name IS DISTINCT FROM EXCLUDED.glue_catalog_table_connection_name
+                        OR COALESCE({target_table}.glue_catalog_table_parameters::jsonb, '{{}}'::jsonb) IS DISTINCT FROM COALESCE(EXCLUDED.glue_catalog_table_parameters::jsonb, '{{}}'::jsonb)
+                        OR {target_table}.glue_dq_ruleset_description IS DISTINCT FROM EXCLUDED.glue_dq_ruleset_description
+                        OR {target_table}.glue_dq_ruleset_dqdl_rules IS DISTINCT FROM EXCLUDED.glue_dq_ruleset_dqdl_rules
+                        OR {target_table}.glue_dq_ruleset_created_timestamp IS DISTINCT FROM EXCLUDED.glue_dq_ruleset_created_timestamp
+                        OR {target_table}.glue_dq_ruleset_last_modified_timestamp IS DISTINCT FROM EXCLUDED.glue_dq_ruleset_last_modified_timestamp
+                    ) THEN CURRENT_TIMESTAMP
+                    ELSE {target_table}.updated_time
+                END,
+                updated_by = CASE 
+                    WHEN (
+                        {target_table}.glue_catalog_table_type IS DISTINCT FROM EXCLUDED.glue_catalog_table_type
+                        OR {target_table}.glue_catalog_table_storage_location IS DISTINCT FROM EXCLUDED.glue_catalog_table_storage_location
+                        OR {target_table}.glue_catalog_table_input_format IS DISTINCT FROM EXCLUDED.glue_catalog_table_input_format
+                        OR {target_table}.glue_catalog_table_output_format IS DISTINCT FROM EXCLUDED.glue_catalog_table_output_format
+                        OR {target_table}.glue_catalog_table_serde_library IS DISTINCT FROM EXCLUDED.glue_catalog_table_serde_library
+                        OR COALESCE({target_table}.glue_catalog_table_serde_parameters::jsonb, '{{}}'::jsonb) IS DISTINCT FROM COALESCE(EXCLUDED.glue_catalog_table_serde_parameters::jsonb, '{{}}'::jsonb)
+                        OR COALESCE({target_table}.glue_catalog_table_columns_metadata::jsonb, '[]'::jsonb) IS DISTINCT FROM COALESCE(EXCLUDED.glue_catalog_table_columns_metadata::jsonb, '[]'::jsonb)
+                        OR COALESCE({target_table}.glue_catalog_table_partition_keys_metadata::jsonb, '[]'::jsonb) IS DISTINCT FROM COALESCE(EXCLUDED.glue_catalog_table_partition_keys_metadata::jsonb, '[]'::jsonb)
+                        OR {target_table}.glue_catalog_table_connection_name IS DISTINCT FROM EXCLUDED.glue_catalog_table_connection_name
+                        OR COALESCE({target_table}.glue_catalog_table_parameters::jsonb, '{{}}'::jsonb) IS DISTINCT FROM COALESCE(EXCLUDED.glue_catalog_table_parameters::jsonb, '{{}}'::jsonb)
+                        OR {target_table}.glue_dq_ruleset_description IS DISTINCT FROM EXCLUDED.glue_dq_ruleset_description
+                        OR {target_table}.glue_dq_ruleset_dqdl_rules IS DISTINCT FROM EXCLUDED.glue_dq_ruleset_dqdl_rules
+                        OR {target_table}.glue_dq_ruleset_created_timestamp IS DISTINCT FROM EXCLUDED.glue_dq_ruleset_created_timestamp
+                        OR {target_table}.glue_dq_ruleset_last_modified_timestamp IS DISTINCT FROM EXCLUDED.glue_dq_ruleset_last_modified_timestamp
+                    ) THEN 'system'
+                    ELSE {target_table}.updated_by
+                END
+            WHERE (
+                {target_table}.glue_catalog_table_type IS DISTINCT FROM EXCLUDED.glue_catalog_table_type
+                OR {target_table}.glue_catalog_table_storage_location IS DISTINCT FROM EXCLUDED.glue_catalog_table_storage_location
+                OR {target_table}.glue_catalog_table_input_format IS DISTINCT FROM EXCLUDED.glue_catalog_table_input_format
+                OR {target_table}.glue_catalog_table_output_format IS DISTINCT FROM EXCLUDED.glue_catalog_table_output_format
+                OR {target_table}.glue_catalog_table_serde_library IS DISTINCT FROM EXCLUDED.glue_catalog_table_serde_library
+                OR COALESCE({target_table}.glue_catalog_table_serde_parameters::jsonb, '{{}}'::jsonb) IS DISTINCT FROM COALESCE(EXCLUDED.glue_catalog_table_serde_parameters::jsonb, '{{}}'::jsonb)
+                OR COALESCE({target_table}.glue_catalog_table_columns_metadata::jsonb, '[]'::jsonb) IS DISTINCT FROM COALESCE(EXCLUDED.glue_catalog_table_columns_metadata::jsonb, '[]'::jsonb)
+                OR COALESCE({target_table}.glue_catalog_table_partition_keys_metadata::jsonb, '[]'::jsonb) IS DISTINCT FROM COALESCE(EXCLUDED.glue_catalog_table_partition_keys_metadata::jsonb, '[]'::jsonb)
+                OR {target_table}.glue_catalog_table_connection_name IS DISTINCT FROM EXCLUDED.glue_catalog_table_connection_name
+                OR COALESCE({target_table}.glue_catalog_table_parameters::jsonb, '{{}}'::jsonb) IS DISTINCT FROM COALESCE(EXCLUDED.glue_catalog_table_parameters::jsonb, '{{}}'::jsonb)
+                OR {target_table}.glue_dq_ruleset_description IS DISTINCT FROM EXCLUDED.glue_dq_ruleset_description
+                OR {target_table}.glue_dq_ruleset_dqdl_rules IS DISTINCT FROM EXCLUDED.glue_dq_ruleset_dqdl_rules
+                OR {target_table}.glue_dq_ruleset_created_timestamp IS DISTINCT FROM EXCLUDED.glue_dq_ruleset_created_timestamp
+                OR {target_table}.glue_dq_ruleset_last_modified_timestamp IS DISTINCT FROM EXCLUDED.glue_dq_ruleset_last_modified_timestamp
+            );
         """
         
         # Prepare all data tuples
