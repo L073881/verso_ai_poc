@@ -148,200 +148,297 @@ def format_metadata(table: Dict[str, Any], ruleset: Optional[Dict[str, Any]] = N
     return formatted
 
 
-def upsert_data(conn, schema_name: str, target_table: str, metadata: Dict[str, Any]) -> None:
-    """
-    Upsert data into PostgreSQL table.
-    Only updates when data has actually changed.
+# def upsert_data(conn, schema_name: str, target_table: str, metadata: Dict[str, Any]) -> None:
+#     """
+#     Upsert data into PostgreSQL table.
+#     Only updates when data has actually changed.
     
-    Uses a two-step approach:
-    1. Check if record exists and if data has changed
-    2. Only update if data has changed
+#     Uses a two-step approach:
+#     1. Check if record exists and if data has changed
+#     2. Only update if data has changed
     
-    Args:
-        conn: psycopg2 database connection
-        schema_name: Database schema name
-        target_table: Target table name
-        metadata: Formatted metadata dictionary
+#     Args:
+#         conn: psycopg2 database connection
+#         schema_name: Database schema name
+#         target_table: Target table name
+#         metadata: Formatted metadata dictionary
+#     """
+#     cursor = None
+#     try:
+#         cursor = conn.cursor()
+        
+#         # First, check if record exists and compare data
+#         check_query = f"""
+#             SELECT 
+#                 glue_catalog_table_type,
+#                 glue_catalog_table_storage_location,
+#                 glue_catalog_table_input_format,
+#                 glue_catalog_table_output_format,
+#                 glue_catalog_table_serde_library,
+#                 glue_catalog_table_serde_parameters::jsonb,
+#                 glue_catalog_table_columns_metadata::jsonb,
+#                 glue_catalog_table_partition_keys_metadata::jsonb,
+#                 glue_catalog_table_connection_name,
+#                 glue_catalog_table_parameters::jsonb,
+#                 glue_dq_ruleset_description,
+#                 glue_dq_ruleset_dqdl_rules,
+#                 glue_dq_ruleset_created_timestamp,
+#                 glue_dq_ruleset_last_modified_timestamp
+#             FROM {schema_name}.{target_table}
+#             WHERE glue_catalog_database_name = %s
+#               AND glue_catalog_table_name = %s
+#               AND glue_dq_ruleset_name = %s;
+#         """
+        
+#         cursor.execute(check_query, (
+#             metadata["database_name"],
+#             metadata["table_name"],
+#             metadata["ruleset_name"]
+#         ))
+        
+#         existing_row = cursor.fetchone()
+        
+#         # Prepare new values for comparison (use raw values, not Json wrappers)
+#         new_values = {
+#             "glue_catalog_table_type": metadata["table_type"],
+#             "glue_catalog_table_storage_location": metadata["storage_location"],
+#             "glue_catalog_table_input_format": metadata["input_format"],
+#             "glue_catalog_table_output_format": metadata["output_format"],
+#             "glue_catalog_table_serde_library": metadata["serde_library"],
+#             "glue_catalog_table_serde_parameters": metadata["serde_parameters"],
+#             "glue_catalog_table_columns_metadata": metadata["columns_metadata"],
+#             "glue_catalog_table_partition_keys_metadata": metadata["partition_keys_metadata"],
+#             "glue_catalog_table_connection_name": metadata["connection_name"],
+#             "glue_catalog_table_parameters": metadata["parameters"],
+#             "glue_dq_ruleset_description": metadata["ruleset_description"],
+#             "glue_dq_ruleset_dqdl_rules": metadata["ruleset_dqdl"],
+#             "glue_dq_ruleset_created_timestamp": metadata["ruleset_created"],
+#             "glue_dq_ruleset_last_modified_timestamp": metadata["ruleset_modified"]
+#         }
+        
+#         # Check if data has changed
+#         data_changed = True
+#         if existing_row:
+#             # Compare each field
+#             existing_values = {
+#                 "glue_catalog_table_type": existing_row[0],
+#                 "glue_catalog_table_storage_location": existing_row[1],
+#                 "glue_catalog_table_input_format": existing_row[2],
+#                 "glue_catalog_table_output_format": existing_row[3],
+#                 "glue_catalog_table_serde_library": existing_row[4],
+#                 "glue_catalog_table_serde_parameters": existing_row[5] if existing_row[5] else {},
+#                 "glue_catalog_table_columns_metadata": existing_row[6] if existing_row[6] else [],
+#                 "glue_catalog_table_partition_keys_metadata": existing_row[7] if existing_row[7] else [],
+#                 "glue_catalog_table_connection_name": existing_row[8],
+#                 "glue_catalog_table_parameters": existing_row[9] if existing_row[9] else {},
+#                 "glue_dq_ruleset_description": existing_row[10],
+#                 "glue_dq_ruleset_dqdl_rules": existing_row[11],
+#                 "glue_dq_ruleset_created_timestamp": existing_row[12],
+#                 "glue_dq_ruleset_last_modified_timestamp": existing_row[13]
+#             }
+            
+#             # Compare values (handle JSON comparison properly)
+#             data_changed = False
+#             for key in new_values:
+#                 old_val = existing_values.get(key)
+#                 new_val = new_values.get(key)
+                
+#                 # Handle JSON/dict/list comparison
+#                 if key in ["glue_catalog_table_serde_parameters", "glue_catalog_table_columns_metadata", 
+#                           "glue_catalog_table_partition_keys_metadata", "glue_catalog_table_parameters"]:
+#                     # Normalize JSON values for comparison
+#                     old_normalized = json.dumps(old_val, sort_keys=True, default=str) if old_val else "{}"
+#                     new_normalized = json.dumps(new_val, sort_keys=True, default=str) if new_val else "{}"
+#                     if old_normalized != new_normalized:
+#                         data_changed = True
+#                         break
+#                 else:
+#                     # Regular comparison (handle None values)
+#                     if old_val != new_val:
+#                         # Check if both are None or empty
+#                         if (old_val is None or old_val == '') and (new_val is None or new_val == ''):
+#                             continue
+#                         data_changed = True
+#                         break
+        
+#         # Only insert/update if record doesn't exist or data has changed
+#         if not existing_row or data_changed:
+#             upsert_query = f"""
+#                 INSERT INTO {schema_name}.{target_table} (
+#                     glue_catalog_database_name,
+#                     glue_catalog_table_name,
+#                     glue_catalog_table_type,
+#                     glue_catalog_table_storage_location,
+#                     glue_catalog_table_input_format,
+#                     glue_catalog_table_output_format,
+#                     glue_catalog_table_serde_library,
+#                     glue_catalog_table_serde_parameters,
+#                     glue_catalog_table_columns_metadata,
+#                     glue_catalog_table_partition_keys_metadata,
+#                     glue_catalog_table_connection_name,
+#                     glue_catalog_table_parameters,
+#                     glue_dq_ruleset_name,
+#                     glue_dq_ruleset_description,
+#                     glue_dq_ruleset_dqdl_rules,
+#                     glue_dq_ruleset_created_timestamp,
+#                     glue_dq_ruleset_last_modified_timestamp,
+#                     created_by
+#                 )
+#                 VALUES (
+#                     %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+#                 )
+#                 ON CONFLICT (glue_catalog_database_name, glue_catalog_table_name, glue_dq_ruleset_name)
+#                 DO UPDATE SET
+#                     glue_catalog_table_type = EXCLUDED.glue_catalog_table_type,
+#                     glue_catalog_table_storage_location = EXCLUDED.glue_catalog_table_storage_location,
+#                     glue_catalog_table_input_format = EXCLUDED.glue_catalog_table_input_format,
+#                     glue_catalog_table_output_format = EXCLUDED.glue_catalog_table_output_format,
+#                     glue_catalog_table_serde_library = EXCLUDED.glue_catalog_table_serde_library,
+#                     glue_catalog_table_serde_parameters = EXCLUDED.glue_catalog_table_serde_parameters,
+#                     glue_catalog_table_columns_metadata = EXCLUDED.glue_catalog_table_columns_metadata,
+#                     glue_catalog_table_partition_keys_metadata = EXCLUDED.glue_catalog_table_partition_keys_metadata,
+#                     glue_catalog_table_connection_name = EXCLUDED.glue_catalog_table_connection_name,
+#                     glue_catalog_table_parameters = EXCLUDED.glue_catalog_table_parameters,
+#                     glue_dq_ruleset_description = EXCLUDED.glue_dq_ruleset_description,
+#                     glue_dq_ruleset_dqdl_rules = EXCLUDED.glue_dq_ruleset_dqdl_rules,
+#                     glue_dq_ruleset_created_timestamp = EXCLUDED.glue_dq_ruleset_created_timestamp,
+#                     glue_dq_ruleset_last_modified_timestamp = EXCLUDED.glue_dq_ruleset_last_modified_timestamp,
+#                     updated_time = CURRENT_TIMESTAMP,
+#                     updated_by = 'system';
+#             """
+            
+#             cursor.execute(upsert_query, (
+#                 metadata["database_name"],
+#                 metadata["table_name"],
+#                 metadata["table_type"],
+#                 metadata["storage_location"],
+#                 metadata["input_format"],
+#                 metadata["output_format"],
+#                 metadata["serde_library"],
+#                 Json(metadata["serde_parameters"]),
+#                 Json(metadata["columns_metadata"]),
+#                 Json(metadata["partition_keys_metadata"]),
+#                 metadata["connection_name"],
+#                 Json(metadata["parameters"]),
+#                 metadata["ruleset_name"],
+#                 metadata["ruleset_description"],
+#                 metadata["ruleset_dqdl"],
+#                 metadata["ruleset_created"],
+#                 metadata["ruleset_modified"],
+#                 'system'
+#             ))
+            
+#             if existing_row and data_changed:
+#                 logger.debug(f"Updated metadata for {metadata['database_name']}.{metadata['table_name']} (ruleset: {metadata['ruleset_name'] or 'N/A'}) - data changed")
+#             elif not existing_row:
+#                 logger.debug(f"Inserted metadata for {metadata['database_name']}.{metadata['table_name']} (ruleset: {metadata['ruleset_name'] or 'N/A'})")
+#         else:
+#             logger.debug(f"Skipped update for {metadata['database_name']}.{metadata['table_name']} (ruleset: {metadata['ruleset_name'] or 'N/A'}) - no changes detected")
+        
+#     except Exception as e:
+#         logger.error(f"Failed to upsert metadata for {metadata['database_name']}.{metadata['table_name']}: {str(e)}")
+#         raise
+#     finally:
+#         if cursor:
+#             cursor.close()
+
+def upsert_data(conn, schema_name: str, target_table: str, metadata: dict) -> None:
     """
-    cursor = None
-    try:
-        cursor = conn.cursor()
-        
-        # First, check if record exists and compare data
-        check_query = f"""
-            SELECT 
-                glue_catalog_table_type,
-                glue_catalog_table_storage_location,
-                glue_catalog_table_input_format,
-                glue_catalog_table_output_format,
-                glue_catalog_table_serde_library,
-                glue_catalog_table_serde_parameters::jsonb,
-                glue_catalog_table_columns_metadata::jsonb,
-                glue_catalog_table_partition_keys_metadata::jsonb,
-                glue_catalog_table_connection_name,
-                glue_catalog_table_parameters::jsonb,
-                glue_dq_ruleset_description,
-                glue_dq_ruleset_dqdl_rules,
-                glue_dq_ruleset_created_timestamp,
-                glue_dq_ruleset_last_modified_timestamp
-            FROM {schema_name}.{target_table}
-            WHERE glue_catalog_database_name = %s
-              AND glue_catalog_table_name = %s
-              AND glue_dq_ruleset_name = %s;
-        """
-        
-        cursor.execute(check_query, (
+    Atomic UPSERT into PostgreSQL.
+    Updates only when data has actually changed using IS DISTINCT FROM.
+    """
+
+    query = f"""
+    INSERT INTO {schema_name}.{target_table} (
+        glue_catalog_database_name,
+        glue_catalog_table_name,
+        glue_dq_ruleset_name,
+
+        glue_catalog_table_type,
+        glue_catalog_table_storage_location,
+        glue_catalog_table_input_format,
+        glue_catalog_table_output_format,
+        glue_catalog_table_serde_library,
+        glue_catalog_table_serde_parameters,
+        glue_catalog_table_columns_metadata,
+        glue_catalog_table_partition_keys_metadata,
+        glue_catalog_table_connection_name,
+        glue_catalog_table_parameters,
+        glue_dq_ruleset_description,
+        glue_dq_ruleset_dqdl_rules,
+        glue_dq_ruleset_created_timestamp,
+        glue_dq_ruleset_last_modified_timestamp,
+        created_by
+    )
+    VALUES (
+        %s, %s, %s,
+        %s, %s, %s, %s, %s,
+        %s, %s, %s, %s, %s,
+        %s, %s, %s, %s,
+        %s
+    )
+    ON CONFLICT (
+        glue_catalog_database_name,
+        glue_catalog_table_name,
+        glue_dq_ruleset_name
+    )
+    DO UPDATE
+    SET
+        glue_catalog_table_type = EXCLUDED.glue_catalog_table_type,
+        glue_catalog_table_storage_location = EXCLUDED.glue_catalog_table_storage_location,
+        glue_catalog_table_input_format = EXCLUDED.glue_catalog_table_input_format,
+        glue_catalog_table_output_format = EXCLUDED.glue_catalog_table_output_format,
+        glue_catalog_table_serde_library = EXCLUDED.glue_catalog_table_serde_library,
+        glue_catalog_table_serde_parameters = EXCLUDED.glue_catalog_table_serde_parameters,
+        glue_catalog_table_columns_metadata = EXCLUDED.glue_catalog_table_columns_metadata,
+        glue_catalog_table_partition_keys_metadata = EXCLUDED.glue_catalog_table_partition_keys_metadata,
+        glue_catalog_table_connection_name = EXCLUDED.glue_catalog_table_connection_name,
+        glue_catalog_table_parameters = EXCLUDED.glue_catalog_table_parameters,
+        glue_dq_ruleset_description = EXCLUDED.glue_dq_ruleset_description,
+        glue_dq_ruleset_dqdl_rules = EXCLUDED.glue_dq_ruleset_dqdl_rules,
+        glue_dq_ruleset_created_timestamp = EXCLUDED.glue_dq_ruleset_created_timestamp,
+        glue_dq_ruleset_last_modified_timestamp = EXCLUDED.glue_dq_ruleset_last_modified_timestamp,
+        updated_time = CURRENT_TIMESTAMP,
+        updated_by = 'system'
+    WHERE
+        {schema_name}.{target_table}.glue_catalog_table_type IS DISTINCT FROM EXCLUDED.glue_catalog_table_type
+     OR {schema_name}.{target_table}.glue_catalog_table_storage_location IS DISTINCT FROM EXCLUDED.glue_catalog_table_storage_location
+     OR {schema_name}.{target_table}.glue_catalog_table_input_format IS DISTINCT FROM EXCLUDED.glue_catalog_table_input_format
+     OR {schema_name}.{target_table}.glue_catalog_table_output_format IS DISTINCT FROM EXCLUDED.glue_catalog_table_output_format
+     OR {schema_name}.{target_table}.glue_catalog_table_serde_library IS DISTINCT FROM EXCLUDED.glue_catalog_table_serde_library
+     OR {schema_name}.{target_table}.glue_catalog_table_serde_parameters IS DISTINCT FROM EXCLUDED.glue_catalog_table_serde_parameters
+     OR {schema_name}.{target_table}.glue_catalog_table_columns_metadata IS DISTINCT FROM EXCLUDED.glue_catalog_table_columns_metadata
+     OR {schema_name}.{target_table}.glue_catalog_table_partition_keys_metadata IS DISTINCT FROM EXCLUDED.glue_catalog_table_partition_keys_metadata
+     OR {schema_name}.{target_table}.glue_catalog_table_connection_name IS DISTINCT FROM EXCLUDED.glue_catalog_table_connection_name
+     OR {schema_name}.{target_table}.glue_catalog_table_parameters IS DISTINCT FROM EXCLUDED.glue_catalog_table_parameters
+     OR {schema_name}.{target_table}.glue_dq_ruleset_description IS DISTINCT FROM EXCLUDED.glue_dq_ruleset_description
+     OR {schema_name}.{target_table}.glue_dq_ruleset_dqdl_rules IS DISTINCT FROM EXCLUDED.glue_dq_ruleset_dqdl_rules
+     OR {schema_name}.{target_table}.glue_dq_ruleset_created_timestamp IS DISTINCT FROM EXCLUDED.glue_dq_ruleset_created_timestamp
+     OR {schema_name}.{target_table}.glue_dq_ruleset_last_modified_timestamp IS DISTINCT FROM EXCLUDED.glue_dq_ruleset_last_modified_timestamp;
+    """
+
+    with conn.cursor() as cursor:
+        cursor.execute(query, (
             metadata["database_name"],
             metadata["table_name"],
-            metadata["ruleset_name"]
-        ))
-        
-        existing_row = cursor.fetchone()
-        
-        # Prepare new values for comparison (use raw values, not Json wrappers)
-        new_values = {
-            "glue_catalog_table_type": metadata["table_type"],
-            "glue_catalog_table_storage_location": metadata["storage_location"],
-            "glue_catalog_table_input_format": metadata["input_format"],
-            "glue_catalog_table_output_format": metadata["output_format"],
-            "glue_catalog_table_serde_library": metadata["serde_library"],
-            "glue_catalog_table_serde_parameters": metadata["serde_parameters"],
-            "glue_catalog_table_columns_metadata": metadata["columns_metadata"],
-            "glue_catalog_table_partition_keys_metadata": metadata["partition_keys_metadata"],
-            "glue_catalog_table_connection_name": metadata["connection_name"],
-            "glue_catalog_table_parameters": metadata["parameters"],
-            "glue_dq_ruleset_description": metadata["ruleset_description"],
-            "glue_dq_ruleset_dqdl_rules": metadata["ruleset_dqdl"],
-            "glue_dq_ruleset_created_timestamp": metadata["ruleset_created"],
-            "glue_dq_ruleset_last_modified_timestamp": metadata["ruleset_modified"]
-        }
-        
-        # Check if data has changed
-        data_changed = True
-        if existing_row:
-            # Compare each field
-            existing_values = {
-                "glue_catalog_table_type": existing_row[0],
-                "glue_catalog_table_storage_location": existing_row[1],
-                "glue_catalog_table_input_format": existing_row[2],
-                "glue_catalog_table_output_format": existing_row[3],
-                "glue_catalog_table_serde_library": existing_row[4],
-                "glue_catalog_table_serde_parameters": existing_row[5] if existing_row[5] else {},
-                "glue_catalog_table_columns_metadata": existing_row[6] if existing_row[6] else [],
-                "glue_catalog_table_partition_keys_metadata": existing_row[7] if existing_row[7] else [],
-                "glue_catalog_table_connection_name": existing_row[8],
-                "glue_catalog_table_parameters": existing_row[9] if existing_row[9] else {},
-                "glue_dq_ruleset_description": existing_row[10],
-                "glue_dq_ruleset_dqdl_rules": existing_row[11],
-                "glue_dq_ruleset_created_timestamp": existing_row[12],
-                "glue_dq_ruleset_last_modified_timestamp": existing_row[13]
-            }
-            
-            # Compare values (handle JSON comparison properly)
-            data_changed = False
-            for key in new_values:
-                old_val = existing_values.get(key)
-                new_val = new_values.get(key)
-                
-                # Handle JSON/dict/list comparison
-                if key in ["glue_catalog_table_serde_parameters", "glue_catalog_table_columns_metadata", 
-                          "glue_catalog_table_partition_keys_metadata", "glue_catalog_table_parameters"]:
-                    # Normalize JSON values for comparison
-                    old_normalized = json.dumps(old_val, sort_keys=True, default=str) if old_val else "{}"
-                    new_normalized = json.dumps(new_val, sort_keys=True, default=str) if new_val else "{}"
-                    if old_normalized != new_normalized:
-                        data_changed = True
-                        break
-                else:
-                    # Regular comparison (handle None values)
-                    if old_val != new_val:
-                        # Check if both are None or empty
-                        if (old_val is None or old_val == '') and (new_val is None or new_val == ''):
-                            continue
-                        data_changed = True
-                        break
-        
-        # Only insert/update if record doesn't exist or data has changed
-        if not existing_row or data_changed:
-            upsert_query = f"""
-                INSERT INTO {schema_name}.{target_table} (
-                    glue_catalog_database_name,
-                    glue_catalog_table_name,
-                    glue_catalog_table_type,
-                    glue_catalog_table_storage_location,
-                    glue_catalog_table_input_format,
-                    glue_catalog_table_output_format,
-                    glue_catalog_table_serde_library,
-                    glue_catalog_table_serde_parameters,
-                    glue_catalog_table_columns_metadata,
-                    glue_catalog_table_partition_keys_metadata,
-                    glue_catalog_table_connection_name,
-                    glue_catalog_table_parameters,
-                    glue_dq_ruleset_name,
-                    glue_dq_ruleset_description,
-                    glue_dq_ruleset_dqdl_rules,
-                    glue_dq_ruleset_created_timestamp,
-                    glue_dq_ruleset_last_modified_timestamp,
-                    created_by
-                )
-                VALUES (
-                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
-                )
-                ON CONFLICT (glue_catalog_database_name, glue_catalog_table_name, glue_dq_ruleset_name)
-                DO UPDATE SET
-                    glue_catalog_table_type = EXCLUDED.glue_catalog_table_type,
-                    glue_catalog_table_storage_location = EXCLUDED.glue_catalog_table_storage_location,
-                    glue_catalog_table_input_format = EXCLUDED.glue_catalog_table_input_format,
-                    glue_catalog_table_output_format = EXCLUDED.glue_catalog_table_output_format,
-                    glue_catalog_table_serde_library = EXCLUDED.glue_catalog_table_serde_library,
-                    glue_catalog_table_serde_parameters = EXCLUDED.glue_catalog_table_serde_parameters,
-                    glue_catalog_table_columns_metadata = EXCLUDED.glue_catalog_table_columns_metadata,
-                    glue_catalog_table_partition_keys_metadata = EXCLUDED.glue_catalog_table_partition_keys_metadata,
-                    glue_catalog_table_connection_name = EXCLUDED.glue_catalog_table_connection_name,
-                    glue_catalog_table_parameters = EXCLUDED.glue_catalog_table_parameters,
-                    glue_dq_ruleset_description = EXCLUDED.glue_dq_ruleset_description,
-                    glue_dq_ruleset_dqdl_rules = EXCLUDED.glue_dq_ruleset_dqdl_rules,
-                    glue_dq_ruleset_created_timestamp = EXCLUDED.glue_dq_ruleset_created_timestamp,
-                    glue_dq_ruleset_last_modified_timestamp = EXCLUDED.glue_dq_ruleset_last_modified_timestamp,
-                    updated_time = CURRENT_TIMESTAMP,
-                    updated_by = 'system';
-            """
-            
-            cursor.execute(upsert_query, (
-                metadata["database_name"],
-                metadata["table_name"],
-                metadata["table_type"],
-                metadata["storage_location"],
-                metadata["input_format"],
-                metadata["output_format"],
-                metadata["serde_library"],
-                Json(metadata["serde_parameters"]),
-                Json(metadata["columns_metadata"]),
-                Json(metadata["partition_keys_metadata"]),
-                metadata["connection_name"],
-                Json(metadata["parameters"]),
-                metadata["ruleset_name"],
-                metadata["ruleset_description"],
-                metadata["ruleset_dqdl"],
-                metadata["ruleset_created"],
-                metadata["ruleset_modified"],
-                'system'
-            ))
-            
-            if existing_row and data_changed:
-                logger.debug(f"Updated metadata for {metadata['database_name']}.{metadata['table_name']} (ruleset: {metadata['ruleset_name'] or 'N/A'}) - data changed")
-            elif not existing_row:
-                logger.debug(f"Inserted metadata for {metadata['database_name']}.{metadata['table_name']} (ruleset: {metadata['ruleset_name'] or 'N/A'})")
-        else:
-            logger.debug(f"Skipped update for {metadata['database_name']}.{metadata['table_name']} (ruleset: {metadata['ruleset_name'] or 'N/A'}) - no changes detected")
-        
-    except Exception as e:
-        logger.error(f"Failed to upsert metadata for {metadata['database_name']}.{metadata['table_name']}: {str(e)}")
-        raise
-    finally:
-        if cursor:
-            cursor.close()
+            metadata["ruleset_name"],
 
+            metadata["table_type"],
+            metadata["storage_location"],
+            metadata["input_format"],
+            metadata["output_format"],
+            metadata["serde_library"],
+            Json(metadata["serde_parameters"]),
+            Json(metadata["columns_metadata"]),
+            Json(metadata["partition_keys_metadata"]),
+            metadata["connection_name"],
+            Json(metadata["parameters"]),
+            metadata["ruleset_description"],
+            metadata["ruleset_dqdl"],
+            metadata["ruleset_created"],
+            metadata["ruleset_modified"],
+            "system"
+        ))
 
 # ============================================================================
 # MAIN SYNC FUNCTION
