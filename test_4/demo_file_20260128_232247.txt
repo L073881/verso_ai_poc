@@ -1,0 +1,13 @@
+# Demo File
+Created: 2026-01-28T23:22:57.742913
+Branch: feature/demo-20260128_232247
+
+This file was automatically created by the create_pr_demo.py script.
+
+## Purpose
+Demonstrating the GitHub Pull Request workflow using the github_client module.
+
+## Details
+- Script: create_pr_demo.py
+- Client: github_client.py
+- Repository: verso_ai_poc
