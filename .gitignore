@@ -1,3 +1,32 @@
-client_config.ini
-__pycache__/github_client.cpython-313.pyc
+# ===========================================
+# Verso AI - Git Ignore
+# ===========================================
+
+# Environment & Secrets
 .env
+client_config.ini
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+
+# Git workspace (cloned repo for operations)
+# CRITICAL: Prevents agent code from being wiped during git pull
+git_workspace/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
