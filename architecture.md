@@ -368,3 +368,116 @@ Maintain a centralized tool registry containing:
   - Require confirmation and/or HITL approval
 - **Logging**:
   - Minimize sensitive content; store references where possible
+
+# Updating `architecture.md` with Author and User Details
+
+## Overview
+This document describes how to update `architecture.md` to include clear, consistent author and user (maintainer/owner) details. Capturing this information improves accountability, eases onboarding, and provides a reliable point of contact for architecture-related decisions.
+
+## Goals
+- Clearly identify **who authored** the architecture documentation and **who owns/maintains** it.
+- Make contact and responsibility information easy to find at the top of the document.
+- Standardize the format for consistency across repositories and teams.
+- Support future updates by tracking ownership and revision history.
+
+## Scope
+This update applies to:
+- The primary `architecture.md` file in the repository.
+- Any derivative architecture documents that mirror or reference `architecture.md` (optional but recommended).
+
+## Recommended Placement
+Add an **Ownership & Contacts** section near the top of `architecture.md`, typically after the title and executive summary (or after the overview section).
+
+Suggested order:
+1. Title
+2. Summary/Overview
+3. **Ownership & Contacts**
+4. Architecture content
+
+## Ownership & Contacts (Template)
+Use the following template to capture author and user details.
+
+### Ownership & Contacts
+- **Author:** `<Full Name>` (`<Role/Title>`)
+  - **Email:** `<author@company.com>`
+  - **GitHub/Username:** `@<handle>` (optional)
+  - **Team/Org:** `<team name>` (optional)
+
+- **Document Owner (Primary):** `<Full Name>` (`<Role/Title>`)
+  - **Email:** `<owner@company.com>`
+  - **GitHub/Username:** `@<handle>` (optional)
+  - **Responsibility:** Accountable for approving changes and ensuring accuracy
+
+- **Maintainers (Optional):**
+  - `<Full Name>` — `@<handle>` — `<email>` — `<team>`
+  - `<Full Name>` — `@<handle>` — `<email>` — `<team>`
+
+- **Slack/Teams Channel (Optional):** `<#channel-name>`
+- **Escalation Path (Optional):** `<team lead / architect name or group>`
+
+## Revision History (Optional but Recommended)
+Include a lightweight revision log to help track meaningful changes.
+
+### Revision History
+| Date (YYYY-MM-DD) | Version | Author | Summary of Change |
+|---|---:|---|---|
+| `<date>` | `v1.0` | `<name>` | Initial creation |
+| `<date>` | `v1.1` | `<name>` | Updated ownership and clarified responsibilities |
+
+## Document Responsibility Guidelines
+Define what “owner” and “maintainer” mean to avoid ambiguity.
+
+### Roles
+- **Author**
+  - Creates the initial document or a major rewrite.
+  - May or may not be the long-term owner.
+
+- **Document Owner (Primary)**
+  - Final approver for architecture changes reflected in the document.
+  - Ensures ongoing accuracy and alignment with the implemented system.
+  - Coordinates updates after major architectural decisions.
+
+- **Maintainers**
+  - Assist the owner by reviewing, updating diagrams, and ensuring references remain current.
+  - Can approve routine updates if delegated by the owner.
+
+### When to Update Ownership Details
+Update the ownership section when:
+- A team re-org changes responsibility boundaries.
+- The primary owner changes roles or leaves the organization.
+- The architecture transitions to a new platform or domain owner.
+- Ownership becomes shared across teams and requires explicit maintainers.
+
+## Standardization Recommendations
+To keep data consistent and discoverable:
+- Use consistent naming: **Author**, **Document Owner**, **Maintainers**.
+- Prefer stable identifiers:
+  - Company email addresses over personal ones.
+  - GitHub usernames for repository context.
+- Avoid embedding sensitive personal data beyond standard work contact details.
+- Keep entries concise; link to internal directories if available.
+
+## Example (Filled In)
+### Ownership & Contacts
+- **Author:** Jordan Lee (Staff Software Engineer)  
+  - **Email:** jordan.lee@company.com  
+  - **GitHub/Username:** @jlee  
+
+- **Document Owner (Primary):** Priya Nair (Principal Architect)  
+  - **Email:** priya.nair@company.com  
+  - **GitHub/Username:** @priyanair  
+  - **Responsibility:** Approves architecture documentation changes and ensures alignment with system design
+
+- **Maintainers:**
+  - Miguel Santos — @msantos — miguel.santos@company.com — Platform Team
+  - Hana Kim — @hanakim — hana.kim@company.com — Infrastructure Team
+
+- **Slack/Teams Channel:** #architecture-review
+- **Escalation Path:** Architecture Guild / Principal Architect on-call
+
+## Acceptance Criteria
+- `architecture.md` includes a clearly labeled **Ownership & Contacts** section.
+- At minimum, the section includes **Author** and **Document Owner**.
+- Contact details are present and valid (email and/or username).
+- Optional **Revision History** is included if the repo requires auditability.
+- Formatting is consistent with Markdown conventions and repository style.
