@@ -333,5 +333,5 @@ This document provides a complete, structured view of the application, including
 ### Contact & Ownership (Fill In)
 - Product Owner:  
 - Technical Owner:  
-- Support Email:  
+- Support Email: aneesh.madupalli@gmail.com  
 - Escalation Path:
